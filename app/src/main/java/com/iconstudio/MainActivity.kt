@@ -12,6 +12,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -27,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke as DrawStroke
 import androidx.compose.ui.input.pointer.pointerInput
@@ -53,6 +55,7 @@ class MainActivity : ComponentActivity() {
 private fun IconStudioApp() {
     val context = LocalContext.current
     val layers = remember { mutableStateListOf(Layer("Camada 1", emptyList())) }
+    LaunchedEffect(Unit) { loadProject(context)?.let { layers.clear(); layers.addAll(it) } }
     var activeLayer by remember { mutableIntStateOf(0) }
     var tool by remember { mutableStateOf(Tool.PEN) }
     var color by remember { mutableStateOf(Color(0xFF20242B)) }
@@ -80,7 +83,7 @@ private fun IconStudioApp() {
             val lj = JSONObject().put("name", layer.name).put("visible", layer.visible)
             val marks = JSONArray()
             layer.marks.forEach { mark ->
-                val mj = JSONObject().put("color", mark.color.value.toLong().toString()).put("width", mark.width).put("tool", mark.tool.name)
+                val mj = JSONObject().put("color", mark.color.toArgb()).put("width", mark.width).put("tool", mark.tool.name)
                 val pts = JSONArray()
                 mark.points.forEach { pts.put(JSONArray().put(it.x).put(it.y)) }
                 mj.put("points", pts); marks.put(mj)
@@ -141,7 +144,7 @@ private fun IconStudioApp() {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("COR", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF667085))
                     Spacer(Modifier.width(10.dp))
-                    palette.forEach { c -> Box(Modifier.padding(end = 8.dp).size(25.dp).background(c, CircleShape).border(if (color == c) 2.dp else 1.dp, if (color == c) Color(0xFF2563EB) else Color(0xFFD0D5DD), CircleShape).padding(3.dp)) { } }
+                    palette.forEach { c -> Box(Modifier.padding(end = 8.dp).size(25.dp).background(c, CircleShape).border(if (color == c) 2.dp else 1.dp, if (color == c) Color(0xFF2563EB) else Color(0xFFD0D5DD), CircleShape).clickable { color = c }) }
                     Spacer(Modifier.weight(1f))
                     TextButton(onClick = { showLayers = true }) { Icon(Icons.Default.Layers, null, Modifier.size(18.dp)); Text("Camadas") }
                 }
@@ -173,6 +176,34 @@ private fun IconStudioApp() {
             TextButton(onClick = { exportPng(context, layers.toList()); showExport = false }) { Text("Exportar PNG") }
         }, dismissButton = { TextButton(onClick = { showExport = false }) { Text("Cancelar") } })
     }
+}
+
+
+private fun loadProject(context: android.content.Context): List<Layer>? {
+    return try {
+        val raw = context.getSharedPreferences("icon_studio", 0).getString("project", null) ?: return null
+        val arr = JSONObject(raw).getJSONArray("layers")
+        buildList {
+            for (i in 0 until arr.length()) {
+                val lj = arr.getJSONObject(i)
+                val marksJson = lj.getJSONArray("marks")
+                val marks = buildList {
+                    for (j in 0 until marksJson.length()) {
+                        val mj = marksJson.getJSONObject(j)
+                        val pointsJson = mj.getJSONArray("points")
+                        val points = buildList {
+                            for (k in 0 until pointsJson.length()) {
+                                val point = pointsJson.getJSONArray(k)
+                                add(Offset(point.getDouble(0).toFloat(), point.getDouble(1).toFloat()))
+                            }
+                        }
+                        add(Mark(points, Color(mj.getInt("color")), mj.getDouble("width").toFloat(), Tool.valueOf(mj.getString("tool"))))
+                    }
+                }
+                add(Layer(lj.getString("name"), marks, lj.optBoolean("visible", true)))
+            }
+        }.ifEmpty { listOf(Layer("Camada 1", emptyList())) }
+    } catch (_: Exception) { null }
 }
 
 private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawMark(mark: Mark) {
